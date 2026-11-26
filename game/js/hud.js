@@ -1,5 +1,9 @@
 // hud.js — the lit instruments: digital altitude/speed/heading, compass tape,
 // fuel and throttle gauges, artificial horizon and centre messages.
+// v3: gear indicator, damage bar, a persistent landing banner on final
+// approach, and a stall warning above the fuel and terrain warnings.
+
+import { finalStrip } from './world.js';
 
 function fmt(n, digits) {
   return n.toFixed(digits === undefined ? 0 : digits);
@@ -22,14 +26,17 @@ export function buildHud(root) {
   <div class="hud hud-tr">
     <div class="gauge"><span class="lbl">SCORE</span><span class="val" id="hud-score">0</span></div>
     <div class="gauge"><span class="lbl">WAKTU</span><span class="val" id="hud-time">0:00</span></div>
+    <div class="gauge"><span class="lbl">GEAR</span><span class="val" id="hud-gear">—</span></div>
   </div>
   <div class="hud hud-bl">
     <div class="bar-row"><span class="lbl">THR</span><div class="bar"><div id="hud-thr" class="fill thr"></div></div><span id="hud-thr-v" class="val-sm">62%</span></div>
     <div class="bar-row"><span class="lbl">FUEL</span><div class="bar"><div id="hud-fuel" class="fill fuel"></div></div><span id="hud-fuel-v" class="val-sm">100%</span></div>
     <div class="bar-row"><span class="lbl">BOOST</span><div class="bar"><div id="hud-boost" class="fill boost"></div></div><span id="hud-boost-v" class="val-sm">100%</span></div>
+    <div class="bar-row"><span class="lbl">DMG</span><div class="bar"><div id="hud-dmg" class="fill dmg"></div></div><span id="hud-dmg-v" class="val-sm">0%</span></div>
   </div>
   <div class="hud hud-br"><canvas id="hud-horizon" width="120" height="120"></canvas><div class="lbl">HORIZON</div></div>
   <div id="hud-msg"></div>
+  <div id="hud-land">◉ MENDARAT — LANDASAN DI DEPAN</div>
   <div id="hud-warn"></div>`;
 }
 
@@ -67,6 +74,8 @@ export function updateHud(plane, mission, rings, now) {
   $('hud-time').textContent = mm + ':' + String(ss).padStart(2, '0');
   $('hud-mission').textContent = mission.name;
   $('hud-objective').textContent = mission.objective;
+  $('hud-gear').textContent = plane.gear ? '▼' : '—';
+  $('hud-gear').classList.toggle('gear-down', plane.gear);
   $('hud-thr').style.width = (plane.throttle * 100) + '%';
   $('hud-thr-v').textContent = Math.round(plane.throttle * 100) + '%';
   $('hud-fuel').style.width = plane.fuel + '%';
@@ -74,6 +83,11 @@ export function updateHud(plane, mission, rings, now) {
   $('hud-boost').style.width = plane.boost + '%';
   $('hud-boost-v').textContent = Math.round(plane.boost) + '%';
   $('hud-fuel').classList.toggle('low', plane.fuel < 25);
+  $('hud-dmg').style.width = plane.damage + '%';
+  $('hud-dmg-v').textContent = Math.round(plane.damage) + '%';
+
+  // Landing banner: on final approach the strip is the mission.
+  $('hud-land').classList.toggle('show', !!plane.landing && !plane.finished);
 
   // Ring progress dots.
   const dots = rings.map((r, i) => `<span class="dot${i < plane.ringsPassed ? ' done' : ''}">${r.final ? '★' : '○'}</span>`).join('');
@@ -90,12 +104,26 @@ export function updateHud(plane, mission, rings, now) {
 
   drawHorizon($('hud-horizon'), plane.roll, plane.pitch);
 
-  // Warnings, throttled.
+  // Warnings, throttled. Stall first: a stalled plane falls out of the sky.
   const warn = $('hud-warn');
   if (now - lastWarn > 400) {
     lastWarn = now;
-    if (plane.fuel < 25 && plane.fuel > 0) warn.textContent = '⚠ LOW FUEL';
-    else if (plane.y < 45) warn.textContent = '⚠ TERRAIN — PULL UP';
+    // The terrain warning stays silent on final: descending below 45 m onto
+    // the strip is the landing itself, not a terrain threat. The window is
+    // the whole approach corridor — from the final ring (900 m out) to the
+    // strip — because the glidepath keeps the plane clear of the ground
+    // ahead all the way down. Off the corridor it still fires, so a low
+    // drift into the city is not hidden. (along/across use the same
+    // centre-minus-plane convention as landingInput: along > 0 means the
+    // plane is still before the strip.)
+    const strip = finalStrip(mission.id);
+    const sdx = strip.cx - plane.x, sdz = strip.cz - plane.z;
+    const sAlong = sdx * strip.dir.x + sdz * strip.dir.z;
+    const sAcross = sdx * (-strip.dir.z) + sdz * strip.dir.x;
+    const onFinal = plane.landing && Math.abs(sAcross) < 160 && sAlong > -100 && sAlong < 900;
+    if (plane.stall) warn.textContent = '⚠ STALL — TURUNKAN HIDUNG';
+    else if (plane.fuel < 25 && plane.fuel > 0) warn.textContent = '⚠ LOW FUEL';
+    else if (plane.y < 45 && !onFinal) warn.textContent = '⚠ TERRAIN — PULL UP';
     else warn.textContent = '';
   }
 }

@@ -33,6 +33,10 @@ html, body { margin: 0; padding: 0; overflow: hidden; background: #050914; font-
 .fill.fuel { background: linear-gradient(90deg, #e8590c, #ffd23c); }
 .fill.fuel.low { background: linear-gradient(90deg, #c92a2a, #ff6b6b); animation: blink 0.6s infinite alternate; }
 .fill.boost { background: linear-gradient(90deg, #1971c2, #37e0ff); }
+.fill.dmg { background: linear-gradient(90deg, #862e9c, #e599f7); }
+#hud-gear.gear-down { color: #2dff5e; text-shadow: 0 0 8px rgba(45, 255, 94, 0.9); }
+#hud-land { position: absolute; top: 19%; left: 50%; transform: translateX(-50%); font-size: 17px; font-weight: 800; letter-spacing: 2px; color: #37e0ff; text-shadow: 0 0 12px rgba(55, 224, 255, 0.9), 0 1px 0 #000; z-index: 6; pointer-events: none; opacity: 0; transition: opacity 0.3s; }
+#hud-land.show { opacity: 1; }
 @keyframes blink { from { opacity: 1; } to { opacity: 0.45; } }
 
 #hud-msg { position: absolute; top: 24%; left: 50%; transform: translateX(-50%); text-align: center; z-index: 6; opacity: 0; transition: opacity 0.3s; pointer-events: none; }

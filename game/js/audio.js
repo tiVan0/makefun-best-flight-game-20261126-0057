@@ -12,6 +12,7 @@ export class SoundEngine {
 
   ensure() {
     if (this.ctx) return;
+    try {
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
     this.ctx = new AC();
@@ -42,6 +43,7 @@ export class SoundEngine {
     this.windGain = this.ctx.createGain(); this.windGain.gain.value = 0;
     noise.connect(bp); bp.connect(this.windGain); this.windGain.connect(this.ctx.destination);
     noise.start();
+    } catch (e) { this.ctx = null; }
   }
 
   setFlight(throttle, speed) {
@@ -83,6 +85,7 @@ export class SoundEngine {
   fanfare() {
     [523, 659, 784, 1046].forEach((f, i) => this.blip(f, 0.32, 'triangle', 0.16, i * 0.13));
   }
+  land() { this.blip(90, 0.25, 'sine', 0.25); this.blip(60, 0.4, 'sine', 0.2, 0.08); }
   toggleMute() {
     this.muted = !this.muted;
     if (this.ctx) {
