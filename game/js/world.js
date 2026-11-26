@@ -215,14 +215,18 @@ export function cityBuildings() {
 }
 
 // Street lights for m4: two avenues flanking the corridor plus cross streets.
+// Denser than v3, and each lamp is warm amber or cool white, so the city
+// floor reads as a living grid instead of a single-colour dot field.
 export function cityLights() {
   const lights = [];
-  for (let z = 300; z <= 8000; z += 170) {
-    lights.push({ x: -150, z });
-    lights.push({ x: 150, z });
+  for (let z = 300; z <= 8000; z += 120) {
+    lights.push({ x: -150, z, c: hashNoise(1, z, 73) > 0.35 ? 0 : 1 });
+    lights.push({ x: 150, z, c: hashNoise(2, z, 73) > 0.35 ? 0 : 1 });
   }
-  for (const z of [1200, 2900, 4600, 6300, 8000]) {
-    for (let x = -720; x <= 720; x += 180) lights.push({ x, z });
+  for (const z of [1200, 2100, 2900, 3800, 4600, 5500, 6300, 7200, 8000]) {
+    for (let x = -720; x <= 720; x += 120) {
+      lights.push({ x, z, c: hashNoise(x, z, 74) > 0.35 ? 0 : 1 });
+    }
   }
   return lights;
 }
@@ -245,29 +249,73 @@ function clamp255(v) {
   return Math.max(0, Math.min(255, v));
 }
 
-// Colour for one ground sample, by height and mission. Continuous ramps plus
-// a fine detail noise, so no flat colour field and no hard contour steps.
+// Colour for one ground sample, by height and mission. Patch-based colour
+// (large soft fbm patches) instead of height-only ramps, so the ground reads
+// as vegetation, sand and rock — never as flat colour fields or contour
+// bands. A fine two-scale grain keeps the texture alive at close range.
 export function groundColor(h, x, z, mission, dist) {
+  // Large soft patch field (~150 m): 0 = dry/open, 1 = dense/vegetated.
+  const patch = fbm(x * 0.006, z * 0.006, 91, 3);
   let c;
   if (mission === 'm2') {
-    c = ramp([[0, [196, 148, 84]], [40, [196, 148, 84]], [80, [214, 172, 104]], [120, [188, 138, 82]], [170, [150, 104, 66]]], h);
+    // Desert: light sand, deeper orange in the hollows, pale crests.
+    const sand = [214, 172, 104], deep = [188, 138, 82], crest = [226, 190, 128];
+    const t = patch;
+    c = [
+      sand[0] + (deep[0] - sand[0]) * (1 - t) * 0.8 + (crest[0] - sand[0]) * Math.max(0, h - 90) / 80,
+      sand[1] + (deep[1] - sand[1]) * (1 - t) * 0.8 + (crest[1] - sand[1]) * Math.max(0, h - 90) / 80,
+      sand[2] + (deep[2] - sand[2]) * (1 - t) * 0.8 + (crest[2] - sand[2]) * Math.max(0, h - 90) / 80,
+    ];
   } else if (mission === 'm3') {
     if (h <= 0) {
       // Smooth sea shimmer from continuous noise, never per-cell blocks.
       const shimmer = fbm(x * 0.02, z * 0.02, 55, 2) * 16;
       c = [10 + shimmer, 26 + shimmer, 62 + shimmer * 2];
+    } else if (h < 6) {
+      // Beach ring: pale sand at the waterline, softening into vegetation.
+      const t = h / 6;
+      c = [214 - 60 * t, 196 - 40 * t, 150 - 30 * t];
     } else {
-      c = ramp([[0, [214, 196, 150]], [30, [214, 196, 150]], [60, [74, 128, 74]], [110, [96, 104, 88]]], h);
+      // Island: vegetation patches, dry grass between them, rock on peaks.
+      const veg = [74, 128, 74], dry = [158, 148, 104], rock = [96, 104, 88];
+      const vegT = Math.max(0, Math.min(1, (patch - 0.42) * 3));
+      c = [
+        dry[0] + (veg[0] - dry[0]) * vegT,
+        dry[1] + (veg[1] - dry[1]) * vegT,
+        dry[2] + (veg[2] - dry[2]) * vegT,
+      ];
+      const rockT = Math.max(0, Math.min(1, (h - 55) / 45));
+      c = [c[0] + (rock[0] - c[0]) * rockT, c[1] + (rock[1] - c[1]) * rockT, c[2] + (rock[2] - c[2]) * rockT];
     }
   } else if (mission === 'm4') {
     const block = (Math.floor(x / 120) + Math.floor(z / 120)) % 2 === 0;
     const vary = (hashNoise(Math.floor(x / 120), Math.floor(z / 120), 71) - 0.5) * 10;
     c = block ? [38 + vary, 40 + vary, 52 + vary] : [30 + vary, 32 + vary, 44 + vary];
+    // Lit avenues: warm pools of light along the two main roads and the
+    // cross streets, so the city floor glows instead of staying flat dark.
+    const ave = Math.min(Math.abs(Math.abs(x) - 150), 40);
+    const cross = [1200, 2900, 4600, 6300, 8000].reduce((m, cz) => Math.min(m, Math.abs(z - cz)), 9999);
+    const lit = Math.max(0, 1 - ave / 40) * 0.7 + Math.max(0, 1 - cross / 40) * 0.5;
+    c = [c[0] + 26 * lit, c[1] + 18 * lit, c[2] + 6 * lit];
   } else {
-    c = ramp([[0, [86, 132, 80]], [45, [86, 132, 80]], [90, [62, 110, 66]], [140, [104, 96, 74]], [185, [122, 116, 108]], [230, [232, 236, 240]]], h);
+    // Valley: meadow, forest patches and rock, snow softening in above
+    // ~190 m — colour comes from patches as much as from height, so the
+    // hills never read as stacked contour bands.
+    const meadow = [86, 132, 80], forest = [52, 96, 58], rock = [122, 116, 108], snow = [232, 236, 240];
+    const forestT = Math.max(0, Math.min(1, (patch - 0.45) * 2.5));
+    c = [
+      meadow[0] + (forest[0] - meadow[0]) * forestT,
+      meadow[1] + (forest[1] - meadow[1]) * forestT,
+      meadow[2] + (forest[2] - meadow[2]) * forestT,
+    ];
+    const rockT = Math.max(0, Math.min(1, (h - 130) / 60));
+    c = [c[0] + (rock[0] - c[0]) * rockT, c[1] + (rock[1] - c[1]) * rockT, c[2] + (rock[2] - c[2]) * rockT];
+    const snowT = Math.max(0, Math.min(1, (h - 185) / 45));
+    c = [c[0] + (snow[0] - c[0]) * snowT, c[1] + (snow[1] - c[1]) * snowT, c[2] + (snow[2] - c[2]) * snowT];
   }
   // Micro relief: fine grain breaks any remaining flat field.
-  const d = (fbm(x * 0.045, z * 0.045, 77, 2) - 0.5) * 22;
+  const d = (fbm(x * 0.045, z * 0.045, 77, 2) - 0.5) * 14
+    + (fbm(x * 0.13, z * 0.13, 79, 1) - 0.5) * 8;
   return [clamp255(c[0] + d), clamp255(c[1] + d), clamp255(c[2] + d)];
 }
 
@@ -275,24 +323,24 @@ export function groundColor(h, x, z, mission, dist) {
 // haze band; rain turns on the rain streaks; sunGlow widens the sun halo.
 export function missionPalette(mission) {
   if (mission === 'm2') return {
-    skyTop: '#f7b733', skyMid: '#e88f4a', skyBot: '#c97e4e', sun: '#fff3c4',
-    fog: [222, 158, 96], sunX: 0.72, sunY: 0.2, night: false,
-    haze: 0.85, rain: false, sunGlow: 1.5,
+    skyTop: '#df7f2c', skyMid: '#f0a04e', skyBot: '#f2c98a', sun: '#fff0b8',
+    fog: [226, 164, 102], sunX: 0.72, sunY: 0.2, night: false,
+    haze: 0.9, rain: false, sunGlow: 1.9,
   };
   if (mission === 'm3') return {
-    skyTop: '#050914', skyMid: '#0d1b3d', skyBot: '#1b2f5e', sun: '#f4f1de',
+    skyTop: '#04081a', skyMid: '#0c1838', skyBot: '#1d3263', sun: '#f4f1de',
     fog: [13, 22, 46], sunX: 0.24, sunY: 0.16, night: true,
-    haze: 0.3, rain: false, sunGlow: 1.1,
+    haze: 0.3, rain: false, sunGlow: 1.3,
   };
   if (mission === 'm4') return {
-    skyTop: '#070a18', skyMid: '#131a33', skyBot: '#232a4d', sun: '#e8ecff',
+    skyTop: '#05071a', skyMid: '#121a38', skyBot: '#2b3560', sun: '#e8ecff',
     fog: [16, 20, 42], sunX: 0.8, sunY: 0.14, night: true,
-    haze: 0.4, rain: false, sunGlow: 1.2,
+    haze: 0.5, rain: false, sunGlow: 1.3,
   };
   return {
-    skyTop: '#3f7fd0', skyMid: '#8fc3ee', skyBot: '#d9ecfa', sun: '#fff8d6',
+    skyTop: '#2e6bc2', skyMid: '#7fb8ec', skyBot: '#cfe8f8', sun: '#fff8d6',
     fog: [168, 198, 228], sunX: 0.68, sunY: 0.18, night: false,
-    haze: 0.55, rain: true, sunGlow: 1.0,
+    haze: 0.6, rain: true, sunGlow: 1.2,
   };
 }
 
